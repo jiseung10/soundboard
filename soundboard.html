@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>웹 사운드보드</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <h1 class="text-2xl font-bold mb-4">🎶 웹 사운드보드</h1>
+  
+  <div class="mb-4">
+    <input type="file" id="fileInput" multiple accept="audio/*" class="mb-2">
+    <p class="text-sm text-gray-600">오디오 파일을 선택하세요 (mp3, wav, ogg 등)</p>
+  </div>
+
+  <div id="buttons" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const buttons = document.getElementById('buttons');
+    let audios = {};
+
+    fileInput.addEventListener('change', (event) => {
+      const files = event.target.files;
+      buttons.innerHTML = ""; // 초기화
+      audios = {};
+      Array.from(files).forEach((file, index) => {
+        const url = URL.createObjectURL(file);
+        const audio = new Audio(url);
+        audios[file.name] = audio;
+
+        const btn = document.createElement('button');
+        btn.innerText = file.name;
+        btn.className = "p-3 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600";
+        btn.onclick = () => {
+          // 다른 소리 중지
+          Object.values(audios).forEach(a => { a.pause(); a.currentTime = 0; });
+          audio.play();
+        };
+        buttons.appendChild(btn);
+      });
+    });
+  </script>
+</body>
+</html>
