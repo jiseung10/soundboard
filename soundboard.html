@@ -1,195 +1,242 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-<meta charset="UTF-8">
-<title>삭제 가능한 웹 사운드보드</title>
+<meta charset="utf-8" />
+<title>사운드보드 (다중 업로드 + 동시 재생)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
-   body {
-     font-family: Arial, sans-serif;
-     background: #f4f4f9;
-     text-align: center;
-     padding: 20px;
-   }
-   h1 { color: #333; }
-   #buttons {
-     display: flex;
-     flex-wrap: wrap;
-     justify-content: center;
-     margin-top: 20px;
-     gap: 10px;
-   }
-   .sound-item {
-     display: flex;
-     flex-direction: column;
-     align-items: center;
-   }
-   .sound-btn {
-     background: #4cafef;
-     color: white;
-     padding: 12px 16px;
-     border: none;
-     border-radius: 10px;
-     cursor: pointer;
-     font-size: 16px;
-     transition: 0.2s;
-     margin-bottom: 4px;
-     min-width: 120px;
-   }
-   .sound-btn:hover { background: #388bcc; }
-   .delete-btn {
-     background: #f44336;
-     color: white;
-     border: none;
-     border-radius: 8px;
-     padding: 6px 10px;
-     cursor: pointer;
-     font-size: 14px;
-   }
-   .delete-btn:hover { background: #c62828; }
-   .controls {
-     margin-top: 20px;
-   }
-   .controls label { margin-right: 10px; }
-   input[type="range"] { width: 150px; }
+  body { font-family: Arial, sans-serif; padding:18px; background:#f7f8fb; color:#111 }
+  h1 { margin:0 0 12px; font-size:20px }
+  #controls { display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap }
+  input[type=file] { padding:6px 8px }
+  #buttons { display:flex; flex-wrap:wrap; gap:10px }
+  .item { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .play { background:#2563eb; color:white; border:0; padding:10px 14px; border-radius:8px; min-width:120px; cursor:pointer }
+  .play.playing { background:#16a34a }
+  .del { background:#ef4444; color:white; border:0; padding:6px 8px; border-radius:6px; cursor:pointer }
+  #status { margin-top:12px; color:#555; font-size:13px }
+  .small { font-size:12px; color:#666 }
 </style>
 </head>
 <body>
-<h1>삭제 가능한 웹 사운드보드</h1>
-<p>오디오 파일을 선택하세요 (여러 개 가능)</p>
-<input type="file" id="fileInput" accept="audio/*" multiple>
-<div id="buttons"></div>
-<div class="controls">
-<label>
-     볼륨:
-<input type="range" id="volumeControl" min="0" max="1" step="0.01" value="1">
-</label>
-<label>
-<input type="checkbox" id="loopControl">
-     반복 재생
-</label>
-</div>
-<p style="margin-top: 10px; font-size: 14px; color: gray;">
-   💡 키보드 단축키: 첫 번째 파일은 <b>1</b>, 두 번째 파일은 <b>2</b>, … 순서대로 재생
-</p>
+  <h1>공연용 사운드보드 (동시 재생 가능)</h1>
+
+  <div id="controls">
+    <label>
+      파일 선택
+      <input id="fileInput" type="file" accept="audio/*" multiple>
+    </label>
+    <label class="small">볼륨
+      <input id="volume" type="range" min="0" max="1" step="0.01" value="1">
+    </label>
+    <label class="small"><input id="loop" type="checkbox"> 반복</label>
+    <button id="clearAll" class="del">모두 삭제</button>
+  </div>
+
+  <div id="buttons"></div>
+
+  <div id="status">로딩 중...</div>
+  <p class="small">키보드 단축키: 1,2,3… (첫 9개)</p>
+
 <script>
-   const fileInput = document.getElementById("fileInput");
-   const buttonsDiv = document.getElementById("buttons");
-   const volumeControl = document.getElementById("volumeControl");
-   const loopControl = document.getElementById("loopControl");
-   let currentAudio = null;
-   let audioList = []; // {name, data(base64)} 배열
+(async function(){
+  const fileInput = document.getElementById('fileInput');
+  const buttonsDiv = document.getElementById('buttons');
+  const status = document.getElementById('status');
+  const volumeCtrl = document.getElementById('volume');
+  const loopCtrl = document.getElementById('loop');
+  const clearAllBtn = document.getElementById('clearAll');
 
-   // ------------------------
-   // 버튼 렌더링
-   // ------------------------
-   function renderButtons() {
-     buttonsDiv.innerHTML = "";
-     audioList.forEach((audio, index) => {
-       const itemDiv = document.createElement("div");
-       itemDiv.className = "sound-item";
-       const btn = document.createElement("button");
-       btn.className = "sound-btn";
-       btn.textContent = `${index+1}. ${audio.name.replace(/\.[^/.]+$/, "")}`;
-       btn.addEventListener("click", () => playSound(audio.data));
-       const delBtn = document.createElement("button");
-       delBtn.className = "delete-btn";
-       delBtn.textContent = "삭제";
-       delBtn.addEventListener("click", () => deleteSound(index));
-       itemDiv.appendChild(btn);
-       itemDiv.appendChild(delBtn);
-       buttonsDiv.appendChild(itemDiv);
-     });
-   }
+  // IndexedDB 유틸
+  function openDB() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('soundboard-db', 2);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('files')) {
+          db.createObjectStore('files', { keyPath: 'name' });
+        }
+      };
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = e => reject(e.target.error);
+    });
+  }
+  async function putFile(file) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('files','readwrite');
+      const store = tx.objectStore('files');
+      const obj = { name: file.name, blob: file, time: Date.now() };
+      const r = store.put(obj);
+      r.onsuccess = () => res();
+      r.onerror = (e) => rej(e.target.error);
+    });
+  }
+  async function getAllFiles() {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('files','readonly');
+      const store = tx.objectStore('files');
+      const req = store.getAll();
+      req.onsuccess = () => res(req.result || []);
+      req.onerror = (e) => rej(e.target.error);
+    });
+  }
+  async function deleteFile(name) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('files','readwrite');
+      const store = tx.objectStore('files');
+      const r = store.delete(name);
+      r.onsuccess = () => res();
+      r.onerror = (e) => rej(e.target.error);
+    });
+  }
+  async function clearAllFiles() {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('files','readwrite');
+      const store = tx.objectStore('files');
+      const r = store.clear();
+      r.onsuccess = () => res();
+      r.onerror = (e) => rej(e.target.error);
+    });
+  }
 
-   // ------------------------
-   // 파일 업로드
-   // ------------------------
-   fileInput.addEventListener("change", (event) => {
-     const files = event.target.files;
-     saveFilesToStorage(files);
-     // 업로드 후 input 초기화 → 같은 파일 다시 올려도 반응하도록
-     fileInput.value = "";
-   });
+  // 상태
+  let list = [];
+  let playingMap = {}; // name → Audio 객체
 
-   // ------------------------
-   // 오디오 재생
-   // ------------------------
-   function playSound(url) {
-     if (currentAudio) {
-       currentAudio.pause();
-       currentAudio.currentTime = 0;
-     }
-     currentAudio = new Audio(url);
-     currentAudio.volume = volumeControl.value;
-     currentAudio.loop = loopControl.checked;
-     currentAudio.play();
-   }
+  function setStatus(msg) { status.textContent = msg; }
+  function revokeAllURLs() {
+    list.forEach(item => { try { URL.revokeObjectURL(item.url); } catch(_){} });
+  }
 
-   // ------------------------
-   // 볼륨 / 반복 설정
-   // ------------------------
-   volumeControl.addEventListener("input", () => {
-     if (currentAudio) currentAudio.volume = volumeControl.value;
-     localStorage.setItem("volume", volumeControl.value);
-   });
-   loopControl.addEventListener("change", () => {
-     if (currentAudio) currentAudio.loop = loopControl.checked;
-     localStorage.setItem("loop", loopControl.checked);
-   });
+  // UI
+  function render() {
+    buttonsDiv.innerHTML = '';
+    list.forEach((item, idx) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'item';
 
-   // ------------------------
-   // 키보드 단축키
-   // ------------------------
-   document.addEventListener("keydown", (e) => {
-     const num = parseInt(e.key);
-     if (!isNaN(num) && num >= 1 && num <= audioList.length) {
-       playSound(audioList[num - 1].data);
-     }
-   });
+      const btn = document.createElement('button');
+      btn.className = 'play' + (playingMap[item.name] ? ' playing' : '');
+      btn.textContent = `${idx+1}. ${item.name.replace(/\.[^/.]+$/,'')}`;
+      btn.onclick = () => togglePlay(item);
 
-   // ------------------------
-   // 삭제 기능
-   // ------------------------
-   function deleteSound(index) {
-     audioList.splice(index, 1);
-     localStorage.setItem("audioFiles", JSON.stringify(audioList));
-     renderButtons();
-   }
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.textContent = '삭제';
+      del.onclick = async () => {
+        stopSound(item.name);
+        await deleteFile(item.name);
+        list = list.filter(it => it.name !== item.name);
+        render();
+        setStatus(`삭제: ${item.name}`);
+      };
 
-   // ------------------------
-   // LocalStorage 저장/불러오기
-   // ------------------------
-   function saveFilesToStorage(files) {
-     let loadedCount = 0;
-     Array.from(files).forEach(file => {
-       const reader = new FileReader();
-       reader.onload = (e) => {
-         audioList.push({ name: file.name, data: e.target.result });
-         loadedCount++;
-         if (loadedCount === files.length) {
-           localStorage.setItem("audioFiles", JSON.stringify(audioList));
-           renderButtons();
-         }
-       };
-       reader.readAsDataURL(file);
-     });
-   }
+      wrap.appendChild(btn);
+      wrap.appendChild(del);
+      buttonsDiv.appendChild(wrap);
+    });
+    setStatus(`파일 ${list.length}개 로드됨`);
+  }
 
-   function loadFilesFromStorage() {
-     const stored = localStorage.getItem("audioFiles");
-     if (stored) {
-       audioList = JSON.parse(stored);
-       renderButtons();
-     }
-     const storedVolume = localStorage.getItem("volume");
-     if (storedVolume) volumeControl.value = storedVolume;
-     const storedLoop = localStorage.getItem("loop");
-     if (storedLoop) loopControl.checked = storedLoop === "true";
-   }
+  // 재생/정지
+  function togglePlay(item) {
+    if (playingMap[item.name]) {
+      stopSound(item.name);
+    } else {
+      const audio = new Audio(item.url);
+      audio.volume = parseFloat(volumeCtrl.value);
+      audio.loop = !!loopCtrl.checked;
+      audio.onended = () => {
+        if (!audio.loop) {
+          delete playingMap[item.name];
+          render();
+        }
+      };
+      audio.play().catch(err => setStatus('재생 오류: ' + err.message));
+      playingMap[item.name] = audio;
+      render();
+      setStatus(`재생: ${item.name}`);
+    }
+  }
+  function stopSound(name) {
+    if (playingMap[name]) {
+      playingMap[name].pause();
+      playingMap[name].currentTime = 0;
+      delete playingMap[name];
+      render();
+      setStatus(`정지: ${name}`);
+    }
+  }
 
-   window.onload = () => loadFilesFromStorage();
+  // 업로드
+  fileInput.addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setStatus('업로드 중...');
+    for (const f of files) await putFile(f);
+    await loadFromDB();
+    setStatus(`업로드 완료 (${files.length}개)`);
+    fileInput.value = '';
+  });
+
+  // DB 로드
+  async function loadFromDB() {
+    revokeAllURLs();
+    list = [];
+    const rows = await getAllFiles();
+    rows.sort((a,b) => a.time - b.time);
+    for (const r of rows) {
+      const url = URL.createObjectURL(r.blob);
+      list.push({ name: r.name, url });
+    }
+    render();
+  }
+
+  // 모두 삭제
+  clearAllBtn.addEventListener('click', async () => {
+    if (!confirm('모든 파일을 삭제할까요?')) return;
+    await clearAllFiles();
+    revokeAllURLs();
+    list = [];
+    playingMap = {};
+    render();
+    setStatus('모두 삭제됨');
+  });
+
+  // 볼륨/루프
+  volumeCtrl.addEventListener('input', () => {
+    Object.values(playingMap).forEach(a => a.volume = volumeCtrl.value);
+    localStorage.setItem('sb-volume', volumeCtrl.value);
+  });
+  loopCtrl.addEventListener('change', () => {
+    Object.values(playingMap).forEach(a => a.loop = !!loopCtrl.checked);
+    localStorage.setItem('sb-loop', loopCtrl.checked ? '1':'0');
+  });
+
+  // 단축키
+  document.addEventListener('keydown', (ev) => {
+    if (['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if (/^[1-9]$/.test(ev.key)) {
+      const idx = parseInt(ev.key,10)-1;
+      if (idx < list.length) togglePlay(list[idx]);
+    }
+  });
+
+  // 초기화
+  const sv = localStorage.getItem('sb-volume');
+  if (sv) volumeCtrl.value = sv;
+  const sl = localStorage.getItem('sb-loop');
+  if (sl) loopCtrl.checked = (sl==='1');
+  await loadFromDB();
+})();
 </script>
 </body>
 </html>
+
+
 
 
