@@ -1,45 +1,195 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>웹 사운드보드</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+<meta charset="UTF-8">
+<title>삭제 가능한 웹 사운드보드</title>
+<style>
+   body {
+     font-family: Arial, sans-serif;
+     background: #f4f4f9;
+     text-align: center;
+     padding: 20px;
+   }
+   h1 { color: #333; }
+   #buttons {
+     display: flex;
+     flex-wrap: wrap;
+     justify-content: center;
+     margin-top: 20px;
+     gap: 10px;
+   }
+   .sound-item {
+     display: flex;
+     flex-direction: column;
+     align-items: center;
+   }
+   .sound-btn {
+     background: #4cafef;
+     color: white;
+     padding: 12px 16px;
+     border: none;
+     border-radius: 10px;
+     cursor: pointer;
+     font-size: 16px;
+     transition: 0.2s;
+     margin-bottom: 4px;
+     min-width: 120px;
+   }
+   .sound-btn:hover { background: #388bcc; }
+   .delete-btn {
+     background: #f44336;
+     color: white;
+     border: none;
+     border-radius: 8px;
+     padding: 6px 10px;
+     cursor: pointer;
+     font-size: 14px;
+   }
+   .delete-btn:hover { background: #c62828; }
+   .controls {
+     margin-top: 20px;
+   }
+   .controls label { margin-right: 10px; }
+   input[type="range"] { width: 150px; }
+</style>
 </head>
-<body class="bg-gray-100 p-6">
-  <h1 class="text-2xl font-bold mb-4">🎶 웹 사운드보드</h1>
-  
-  <div class="mb-4">
-    <input type="file" id="fileInput" multiple accept="audio/*" class="mb-2">
-    <p class="text-sm text-gray-600">오디오 파일을 선택하세요 (mp3, wav, ogg 등)</p>
-  </div>
+<body>
+<h1>삭제 가능한 웹 사운드보드</h1>
+<p>오디오 파일을 선택하세요 (여러 개 가능)</p>
+<input type="file" id="fileInput" accept="audio/*" multiple>
+<div id="buttons"></div>
+<div class="controls">
+<label>
+     볼륨:
+<input type="range" id="volumeControl" min="0" max="1" step="0.01" value="1">
+</label>
+<label>
+<input type="checkbox" id="loopControl">
+     반복 재생
+</label>
+</div>
+<p style="margin-top: 10px; font-size: 14px; color: gray;">
+   💡 키보드 단축키: 첫 번째 파일은 <b>1</b>, 두 번째 파일은 <b>2</b>, … 순서대로 재생
+</p>
+<script>
+   const fileInput = document.getElementById("fileInput");
+   const buttonsDiv = document.getElementById("buttons");
+   const volumeControl = document.getElementById("volumeControl");
+   const loopControl = document.getElementById("loopControl");
+   let currentAudio = null;
+   let audioList = []; // {name, data(base64)} 배열
 
-  <div id="buttons" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
+   // ------------------------
+   // 버튼 렌더링
+   // ------------------------
+   function renderButtons() {
+     buttonsDiv.innerHTML = "";
+     audioList.forEach((audio, index) => {
+       const itemDiv = document.createElement("div");
+       itemDiv.className = "sound-item";
+       const btn = document.createElement("button");
+       btn.className = "sound-btn";
+       btn.textContent = `${index+1}. ${audio.name.replace(/\.[^/.]+$/, "")}`;
+       btn.addEventListener("click", () => playSound(audio.data));
+       const delBtn = document.createElement("button");
+       delBtn.className = "delete-btn";
+       delBtn.textContent = "삭제";
+       delBtn.addEventListener("click", () => deleteSound(index));
+       itemDiv.appendChild(btn);
+       itemDiv.appendChild(delBtn);
+       buttonsDiv.appendChild(itemDiv);
+     });
+   }
 
-  <script>
-    const fileInput = document.getElementById('fileInput');
-    const buttons = document.getElementById('buttons');
-    let audios = {};
+   // ------------------------
+   // 파일 업로드
+   // ------------------------
+   fileInput.addEventListener("change", (event) => {
+     const files = event.target.files;
+     saveFilesToStorage(files);
+     // 업로드 후 input 초기화 → 같은 파일 다시 올려도 반응하도록
+     fileInput.value = "";
+   });
 
-    fileInput.addEventListener('change', (event) => {
-      const files = event.target.files;
-      buttons.innerHTML = ""; // 초기화
-      audios = {};
-      Array.from(files).forEach((file, index) => {
-        const url = URL.createObjectURL(file);
-        const audio = new Audio(url);
-        audios[file.name] = audio;
+   // ------------------------
+   // 오디오 재생
+   // ------------------------
+   function playSound(url) {
+     if (currentAudio) {
+       currentAudio.pause();
+       currentAudio.currentTime = 0;
+     }
+     currentAudio = new Audio(url);
+     currentAudio.volume = volumeControl.value;
+     currentAudio.loop = loopControl.checked;
+     currentAudio.play();
+   }
 
-        const btn = document.createElement('button');
-        btn.innerText = file.name;
-        btn.className = "p-3 rounded-lg bg-indigo-500 text-white hover:bg-indigo-600";
-        btn.onclick = () => {
-          // 다른 소리 중지
-          Object.values(audios).forEach(a => { a.pause(); a.currentTime = 0; });
-          audio.play();
-        };
-        buttons.appendChild(btn);
-      });
-    });
-  </script>
+   // ------------------------
+   // 볼륨 / 반복 설정
+   // ------------------------
+   volumeControl.addEventListener("input", () => {
+     if (currentAudio) currentAudio.volume = volumeControl.value;
+     localStorage.setItem("volume", volumeControl.value);
+   });
+   loopControl.addEventListener("change", () => {
+     if (currentAudio) currentAudio.loop = loopControl.checked;
+     localStorage.setItem("loop", loopControl.checked);
+   });
+
+   // ------------------------
+   // 키보드 단축키
+   // ------------------------
+   document.addEventListener("keydown", (e) => {
+     const num = parseInt(e.key);
+     if (!isNaN(num) && num >= 1 && num <= audioList.length) {
+       playSound(audioList[num - 1].data);
+     }
+   });
+
+   // ------------------------
+   // 삭제 기능
+   // ------------------------
+   function deleteSound(index) {
+     audioList.splice(index, 1);
+     localStorage.setItem("audioFiles", JSON.stringify(audioList));
+     renderButtons();
+   }
+
+   // ------------------------
+   // LocalStorage 저장/불러오기
+   // ------------------------
+   function saveFilesToStorage(files) {
+     let loadedCount = 0;
+     Array.from(files).forEach(file => {
+       const reader = new FileReader();
+       reader.onload = (e) => {
+         audioList.push({ name: file.name, data: e.target.result });
+         loadedCount++;
+         if (loadedCount === files.length) {
+           localStorage.setItem("audioFiles", JSON.stringify(audioList));
+           renderButtons();
+         }
+       };
+       reader.readAsDataURL(file);
+     });
+   }
+
+   function loadFilesFromStorage() {
+     const stored = localStorage.getItem("audioFiles");
+     if (stored) {
+       audioList = JSON.parse(stored);
+       renderButtons();
+     }
+     const storedVolume = localStorage.getItem("volume");
+     if (storedVolume) volumeControl.value = storedVolume;
+     const storedLoop = localStorage.getItem("loop");
+     if (storedLoop) loopControl.checked = storedLoop === "true";
+   }
+
+   window.onload = () => loadFilesFromStorage();
+</script>
 </body>
 </html>
+
+
